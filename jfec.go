@@ -14,6 +14,7 @@ import (
 	"os"            // for Exit/Open
 	"runtime"       // for parallel processing
 	"runtime/debug" // for Stack / PrintStack
+	"io"
 )
 
 /*
@@ -468,10 +469,8 @@ func NewFec(k, n uint8) *Fec {
 	}
 	return retval
 }
-
-/*
- * This generates a header that matches the zfec command-line tool.  The code is ugly, because it is a direct port.  Personally, I would spend the 2 extra bytes per file to make this code cleaner...
- */
+ //This generates a header that matches the zfec command-line tool.  The code is ugly, because it is a direct port.
+// Personally, I would spend the 2 extra bytes per file to make this code cleaner...
 func gen_header(code *Fec, padding, num uint) []byte {
 	m := uint(code.n) // stupid n<->m
 	k := uint(code.k)
@@ -501,7 +500,7 @@ func gen_header(code *Fec, padding, num uint) []byte {
 	switch {
 	case bitsused <= 16:
 		val <<= (16 - bitsused)
-		err := binary.Write(buf, binary.BigEndian, uint32(val))
+		err := binary.Write(buf, binary.BigEndian, uint16(val))
 		if err != nil {
 			fmt.Println("binary.Write failed:", err)
 		}
@@ -522,6 +521,73 @@ func gen_header(code *Fec, padding, num uint) []byte {
 	}
 	return buf.Bytes()[0:4]
 }
+
+func mask(bits uint) uint {
+	return (1 << bits) - 1
+}
+func parseHeader(inf io.Reader) (n, k, pad, sh uint8, err error) {
+	buffer := make([]byte, 1)
+	_, err = inf.Read(buffer)
+	if err != nil {
+		return
+	}
+	n = buffer[0] + 1
+	kbits := log_ceil(uint(n), 2)
+	b2_bits_left := 8 - kbits
+	kbitmask := mask(kbits) << b2_bits_left
+	_, err = inf.Read(buffer)
+	if err != nil {
+		return
+	}
+	k = uint8(((uint(buffer[0]) & kbitmask) >> b2_bits_left) + 1)
+
+	shbits := log_ceil(uint(n), 2)
+	padbits := log_ceil(uint(k), 2)
+
+	val := uint(buffer[0]) & (^kbitmask)
+
+	needed_padbits := padbits - b2_bits_left
+	if needed_padbits > 0 {
+		_, err = inf.Read(buffer)
+		if err != nil {
+			return
+		}
+		byteBuffer := bytes.NewBuffer(buffer)
+		var b uint8
+		binary.Read(byteBuffer, binary.BigEndian, &b)
+		val <<= 8
+		val |= uint(b)
+		needed_padbits -= 8
+	}
+	assert(needed_padbits <= 0)
+
+	extrabits := -needed_padbits
+	pad = uint8(val >> extrabits)
+	val &= mask(extrabits)
+
+	needed_shbits := shbits - extrabits
+	if needed_shbits > 0 {
+		_, err = inf.Read(buffer)
+		if err != nil {
+			return
+		}
+
+		byteBuffer := bytes.NewBuffer(buffer)
+		var b uint8
+		binary.Read(byteBuffer, binary.BigEndian, &b)
+		val <<= 8
+		val |= uint(b)
+		needed_shbits -= 8
+	}
+	assert(needed_shbits <= 0)
+
+	gotshbits := -needed_shbits
+
+	sh = uint8(val >> gotshbits)
+
+	return
+}
+
 
 /*
 Helper function to take a filename and turn it into input and output bufio.Reader/Writer objects to pass to Encode_buffers() -- I wanted to make sure I could run encode on any arbitrary buffers, but the case of handling files makes it easier to compare to zfec.
@@ -696,3 +762,5 @@ func (code *Fec) Fec_decode(inpkts, outpkts [][]uint8, index []uint8, sz uint) {
 		}
 	}
 }
+
+
