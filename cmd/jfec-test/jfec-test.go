@@ -1,7 +1,7 @@
 package main
 
 import (
-	"jfec"
+	"github.com/volker48/jfec"
 	"fmt"
 	"os"
 	"flag"
