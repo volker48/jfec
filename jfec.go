@@ -10,6 +10,7 @@ import (
 	"bytes"           // for Compare
 	"encoding/binary" // for binary.Write
 	"fmt"
+	"log"
 	"os"            // for Exit/Open
 	"runtime"       // for parallel processing
 	"runtime/debug" // for Stack / PrintStack
@@ -530,19 +531,22 @@ func (code *Fec) Encode_files(baseFilename string, addZfecHeader bool) {
 	infile, _ := os.Open(baseFilename)
 	defer infile.Close()
 	fi, _ := infile.Stat()
-	insz := fi.Size()
+	inputSize := fi.Size()
 	outfiles := make([]*bufio.Writer, code.n)
-	padding := uint(uint(code.k) - uint(insz%int64(code.k)))
+	padding := uint(uint(code.k) - uint(inputSize%int64(code.k)))
 	for i := 0; i < int(code.n); i++ {
 		fn := fmt.Sprintf("%s.%02d_%02d.jfec", baseFilename, i, code.n)
-		fi, _ := os.Create(fn)
+		fi, err := os.Create(fn)
+		if err != nil {
+			log.Fatal("Could not create output file", err)
+		}
 		defer fi.Close()
 		outfiles[i] = bufio.NewWriter(fi)
 		if addZfecHeader {
 			outfiles[i].Write(gen_header(code, padding, uint(i)))
 		}
 	}
-	code.Encode_buffers(bufio.NewReader(infile), outfiles, insz)
+	code.Encode_buffers(bufio.NewReader(infile), outfiles, inputSize)
 	// lets make sure everything is written to disk before we move on...
 	for _, wr := range outfiles {
 		wr.Flush()
@@ -550,15 +554,15 @@ func (code *Fec) Encode_files(baseFilename string, addZfecHeader bool) {
 }
 
 // Here I will try to use parallelism and sane IO (read some then write some) to make this work more smoothly with a smaller memory footprint
-func (code *Fec) Encode_buffers(datain *bufio.Reader, dataout []*bufio.Writer, insz int64) {
+func (code *Fec) Encode_buffers(datain *bufio.Reader, dataout []*bufio.Writer, inputSize int64) {
 	writerDone := make(chan bool, 1)
 	rateLimiter := make(chan int, runtime.NumCPU()+1) // no more than (number of CPUs+1) encoder processes running
 	fmt.Printf("Setting GOMAXPROCS to NumCPU==%d\n", runtime.NumCPU())
 	runtime.GOMAXPROCS(runtime.NumCPU()) // run on as many CPUs as I can
 
 	kchunksz := int(CHUNKSIZE * int(code.k))
-	numkchunks := int(insz / int64(kchunksz))
-	if insz%int64(kchunksz) != 0 {
+	numkchunks := int(inputSize / int64(kchunksz))
+	if inputSize%int64(kchunksz) != 0 {
 		numkchunks++
 	}
 
