@@ -3,7 +3,45 @@ package jfec
 import (
 	"bytes"
 	"testing"
+	"testing/quick"
+	"math/rand"
+	"reflect"
+	"log"
 )
+
+func headerVals(vals []reflect.Value, r *rand.Rand) {
+	n := rand.Intn(256)
+
+	k := rand.Intn(n)
+
+	vals[0] = reflect.ValueOf(byte(k))
+	vals[1] = reflect.ValueOf(byte(n))
+
+	num := rand.Intn(k)
+
+	vals[2] = reflect.ValueOf(uint(num))
+
+	inputSize := rand.Int63()
+
+	vals[3] = reflect.ValueOf(inputSize)
+
+}
+
+func TestHeaderQuick(t *testing.T) {
+	f := func(k, n byte, num uint, inputSize int64) bool {
+		log.Printf("k: %d, n: %d, num: %d", k, n, num)
+		fec := NewFec(k, n)
+		padding := getPadding(inputSize, k)
+		header := gen_header(fec, padding, num)
+		rdr := bytes.NewReader(header)
+		headerN, headerK, headerPad, headerNum, err := parseHeader(rdr)
+		return n == uint8(headerN) && k == uint8(headerK) && padding == headerPad && num == headerNum && err == nil
+	}
+	conf := &quick.Config{Values: headerVals}
+	if err := quick.Check(f, conf); err != nil {
+		t.Error(err)
+	}
+}
 
 func TestHeaderGenParse(t *testing.T) {
 	fec := NewFec(3, 10)
