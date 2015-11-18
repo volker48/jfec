@@ -226,7 +226,7 @@ func _matmul(a, b, c []uint8, n, k, m uint8) {
 	var acc uint8
 	for row = 0; row < n; row++ {
 		for col = 0; col < m; col++ {
-			pa := row * k
+			pa := uint16(row) * uint16(k)
 			pb := col
 			acc = 0
 			for i = 0; i < k; i, pa, pb = i+1, pa+1, pb+m {
@@ -433,8 +433,8 @@ func NewFec(k, n uint8) *Fec {
 	retval := new(Fec)
 	retval.k = k
 	retval.n = n
-	retval.enc_matrix = make([]uint8, n*k)
-	tmp_m := make([]uint8, n*k)
+	retval.enc_matrix = make([]uint8, uint16(n)*uint16(k))
+	tmp_m := make([]uint8, uint16(n)*uint16(k))
 	/*
 	 * fill the matrix with powers of field elements, starting from 0.
 	 * The first row is special, cannot be computed with exp. table.
@@ -454,16 +454,16 @@ func NewFec(k, n uint8) *Fec {
 	 * by the inverse, and construct the identity matrix at the top.
 	 */
 	_invert_vdm(tmp_m, k) /* much faster than _invert_mat */
-	_matmul(tmp_m[k*k:len(tmp_m)], tmp_m[0:k*k], retval.enc_matrix[k*k:len(retval.enc_matrix)], n-k, k, k)
+	_matmul(tmp_m[uint16(k)*uint16(k):len(tmp_m)], tmp_m[0:uint16(k)*uint16(k)], retval.enc_matrix[uint16(k)*uint16(k):len(retval.enc_matrix)], n-k, k, k)
 	/*
 	 * the upper matrix is I so do not bother with a slow multiply
 	 */
 	for row = 0; row < k; row++ {
 		for col = 0; col < k; col++ {
 			if col == row {
-				retval.enc_matrix[row*k+col] = 1
+				retval.enc_matrix[uint16(row)*uint16(k)+uint16(col)] = 1
 			} else {
-				retval.enc_matrix[row*k+col] = 0
+				retval.enc_matrix[uint16(row)*uint16(k)+uint16(col)] = 0
 			}
 		}
 	}
@@ -504,7 +504,7 @@ func gen_header(code *Fec, padding, num uint) []byte {
 	switch {
 	case bitsused <= 16:
 		val <<= (16 - bitsused)
-		err := binary.Write(buf, binary.BigEndian, uint16(val))
+		err := binary.Write(buf, binary.BigEndian, uint32(val))
 		if err != nil {
 			fmt.Println("binary.Write failed:", err)
 		}
@@ -558,7 +558,7 @@ func parseHeader(inf io.Reader) (n, k, pad, sh uint, err error) {
 			return
 		}
 		byteBuffer := bytes.NewBuffer(buffer)
-		var b uint8
+		var b byte
 		binary.Read(byteBuffer, binary.BigEndian, &b)
 		val <<= 8
 		val |= uint(b)
@@ -594,7 +594,11 @@ func parseHeader(inf io.Reader) (n, k, pad, sh uint, err error) {
 }
 
 func getPadding(inputSize int64, k uint8) uint {
-	return uint(k) - uint(inputSize%int64(k))
+	if inputSize % int64(k) > 0{
+		return uint(k) - uint(inputSize % int64(k))
+	} else {
+		return 0
+	}
 }
 
 /*
